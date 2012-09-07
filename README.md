@@ -1,0 +1,4 @@
+nbc
+===
+
+naive Bayes classifier
