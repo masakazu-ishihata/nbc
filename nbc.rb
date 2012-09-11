@@ -60,6 +60,19 @@ OptionParser.new { |opts|
 }
 
 ################################################################################
+# Array
+################################################################################
+class Array
+  def max
+    max = self[0]
+    for i in 1..self.size-1
+      max = self[i] if max < self[i]
+    end
+    max
+  end
+end
+
+################################################################################
 # Component
 ################################################################################
 class MyComponent
@@ -90,7 +103,10 @@ end
 class MyCategorical < MyComponent
   #### new ####
   def initialize(_vals)
-    @n = _vals.size
+    vals = _vals
+    vals = vals + ["others"] if vals.size == 1
+
+    @n = vals.size
     @p = Array.new(@n){|p| rand}
     sum = 0
     @p.each do |p|
@@ -100,8 +116,8 @@ class MyCategorical < MyComponent
 
     @v2i = Hash.new
     @i2v = Array.new
-    for i in 0.._vals.size-1
-      v = _vals[i]
+    for i in 0..@n-1
+      v = vals[i]
       @v2i[v] = i
       @i2v[i] = v
     end
@@ -129,19 +145,32 @@ class MyCategorical < MyComponent
   def learn(_d)
     c = Array.new(@n){|i| 0}
     _d.each do |v|
-      c[ @v2i[v] ] += 1
+      c[ v2i(v) ] += 1
     end
     for i in 0..@n-1
       @p[i] = c[i] / _d.size.to_f
     end
   end
 
+  #### get id ####
+  def v2i(_v)
+    if _v == "?"
+      max = 0
+      for i in 1..@n-1
+        max = i if @p[max] < @p[i]
+      end
+      max
+    else
+      @v2i[_v]
+    end
+  end
+
   #### likelihood ####
   def likelihood(_x)
-    @p[ @v2i[_x] ]
+    @p[ v2i(_x) ]
   end
   def log_likelihood(_x)
-    Math::log( @p[ @v2i[_x] ] )
+    Math::log( @p[ v2i(_x) ] )
   end
 
   #### type ####
@@ -171,16 +200,25 @@ class MyGaussian < MyComponent
   #### learn parameters from _d ####
   def learn(_d)
     # average
+    u = @u
     @u = 0
     _d.each do |d|
-      @u += d
+      if d == "?"
+        @u += u
+      else
+        @u += d
+      end
     end
     @u /= _d.size
 
     # variance
     @s = 0
     _d.each do |d|
-      @s += (@u - d)**2
+      if d == "?"
+        # nothing
+      else
+        @s += (@u - d)**2
+      end
     end
     @s /= _d.size
   end
@@ -209,10 +247,12 @@ class MyGaussian < MyComponent
 
   #### likelihood ####
   def likelihood(_x)
+    return 1 if _x == "?"
     Math::exp(-(@u - _x)**2 / (2*@s) ) / Math::sqrt(2 * Math::PI * @s)
   end
 
   def log_likelihood(_x)
+    return 0 if _x == "?"
     -(@u - _x)**2 / (2*@s)  -  Math::log(2 * Math::PI * @s) / 2
   end
 
@@ -282,6 +322,7 @@ class MyNaiveBayesModel
       # convert string -> float
       if flag
         for i in 0.._d.size-1
+          next if _d[i][n] == "?"
           _d[i][n] = _d[i][n].to_f
         end
       end
@@ -291,7 +332,7 @@ class MyNaiveBayesModel
         if flag
           mm.set_component(k, n, MyGaussian.new(0, 1))
         else
-          mm.set_component(k, n, MyCategorical.new(vals[n].keys))
+          mm.set_component(k, n, MyCategorical.new(vals[n].keys - ["?"]))
         end
       end
     end
@@ -455,6 +496,7 @@ def numbers?(_ns)
   return false if _ns.size <= 10
 
   _ns.each do |n|
+    next if n == "?"
     return false if !(n.to_s =~ /\d+.\d+/ || n.to_s =~ /\d/)
   end
 
@@ -476,7 +518,7 @@ def load_data(_file, _y)
   xs = []
 
   open(_file).read.split("\n").each do |line|
-    x = line.split(/[,;:]/)
+    x = line.gsub(/ /, "").split(/[,;:]/)
 
     # target
     if _y != nil
@@ -501,6 +543,11 @@ end
 #### load data ####
 if @file == nil
   db = rand_data(@m)
+  db[1].each do |x|
+    for i in 0..x.size-1
+      x[i] = "?" if rand < 0
+    end
+  end
 else
   db = load_data(@file, @y)
 end
@@ -557,8 +604,8 @@ for k in 0..@k-1
     h[ ys[i] ] += 1
   end
 
-  puts "cluster #{k+1} : #{c[k].size} #{h}"
-
+  print "cluster #{k+1} (#{c[k].size}) : "
+  puts  "#{h.keys.sort.map{|k| sprintf("%s (%d)", k, h[k]) }.join(", ")}"
   next if !@show
   c[k].each do |i|
     y = ys[i]
